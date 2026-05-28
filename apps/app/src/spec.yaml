@@ -6,8 +6,6 @@ api:
       group: common
       method: GET
       response: { "status": "ok", "uptime": 123 }
-      runs: 
-       - name: service.AuthService.getToken
 
     - path: /api/version
       group: common
@@ -21,6 +19,8 @@ api:
       body: { "username": "john", "email": "john@example.com", "password": "secret" }
       response: { "id": 1, "username": "john", "email": "john@example.com" }
       runs:
+        - name: service.LoggerService.logAction
+          input: '{ action: "register", meta: { username: .username } }'
         - name: service.AuthService.register
 
     - path: /api/auth/login
@@ -39,6 +39,8 @@ api:
       response: { "message": "logged out" }
       runs:
         - name: service.AuthService.logout
+        - name: service.LoggerService.logAction
+          input: '{ action: "logout" }'
 
     - path: /api/auth/refresh
       group: auth
@@ -47,19 +49,24 @@ api:
       response: { "token": "new-jwt", "refreshToken": "new-rt" }
       runs:
         - name: service.AuthService.refresh
-        - name: service.AuthService.refresh
+          output: '{ accessToken: .token, refreshToken }'
 
     # ── User ────────────────────────────────────────────────────────────────
     - path: /api/user/profile
       group: user
       method: GET
       response: { "id": 1, "username": "john", "email": "john@example.com", "bio": "hello world" }
+      runs:
+        - name: service.UserService.getProfile
+          output: '{ id, name: .username, email, bio }'
 
     - path: /api/user/profile
       group: user
       method: PUT
       body: { "username": "john_updated", "email": "john2@example.com", "bio": "updated bio" }
       response: { "id": 1, "username": "john_updated", "email": "john2@example.com", "bio": "updated bio" }
+      runs:
+        - name: service.UserService.updateProfile
 
     - path: /api/user/avatar
       group: user
@@ -72,26 +79,41 @@ api:
       method: DELETE
       body: { "password": "secret" }
       response: { "message": "account deleted" }
+      runs:
+        - name: service.UserService.deleteAccount
+        - name: service.LoggerService.logAction
+          input: '{ action: "account_deleted" }'
 
     # ── Post ────────────────────────────────────────────────────────────────
     - path: /api/posts
       group: post
       method: GET
       response: [{ "id": 1, "title": "Hello", "content": "World", "authorId": 1 }]
+      runs:
+        - name: service.PostService.list
 
     - path: /api/posts
       group: post
       method: POST
       body: { "title": "New Post", "content": "Some content", "tags": ["news", "tech"] }
       response: { "id": 1, "title": "New Post", "content": "Some content", "authorId": 1 }
+      runs:
+        - name: service.LoggerService.logAction
+          input: '{ action: "create_post", meta: { title: .title } }'
+        - name: service.PostService.create
+          input: '{ title, content, tags }'
 
     - path: /api/posts/detail
       group: post
       method: GET
       response: { "id": 1, "title": "Hello", "content": "World", "authorId": 1, "views": 42 }
+      runs:
+        - name: service.PostService.getDetail
 
     - path: /api/posts/detail
       group: post
       method: PUT
       body: { "title": "Updated", "content": "Updated content" }
       response: { "id": 1, "title": "Updated", "content": "Updated content", "authorId": 1 }
+      runs:
+        - name: service.PostService.update
