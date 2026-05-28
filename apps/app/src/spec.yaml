@@ -6,6 +6,8 @@ api:
       group: common
       method: GET
       response: { "status": "ok", "uptime": 123 }
+      runs: 
+       - name: service.AuthService.getToken
 
     - path: /api/version
       group: common
@@ -18,23 +20,31 @@ api:
       method: POST
       body: { "username": "john", "email": "john@example.com", "password": "secret" }
       response: { "id": 1, "username": "john", "email": "john@example.com" }
+      runs:
+        - name: service.AuthService.register
 
     - path: /api/auth/login
       group: auth
       method: POST
       body: { "username": "example", "password": "123" }
       response: { "token": "jwt-token-here", "expiresIn": 3600 }
+      runs:
+        - name: service.AuthService.getToken
 
     - path: /api/auth/logout
       group: auth
       method: POST
       response: { "message": "logged out" }
+      runs:
+        - name: service.AuthService.logout
 
     - path: /api/auth/refresh
       group: auth
       method: POST
       body: { "refreshToken": "rt-abc123" }
       response: { "token": "new-jwt", "refreshToken": "new-rt" }
+      runs:
+        - name: service.AuthService.refresh
 
     # ── User ────────────────────────────────────────────────────────────────
     - path: /api/user/profile

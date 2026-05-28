@@ -4,7 +4,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "bun run --watch src/index.ts",
-    "generate": "bun run ../../packages/manifets-cli/src/index.ts src/spec.yaml ./src/generated"
+    "generate": "bun run ../../packages/manifets-cli/src/index.ts src/spec.yaml -o ./src/generated -i ./src/implems"
   },
   "dependencies": {
     "awilix": "^13.0.3",
