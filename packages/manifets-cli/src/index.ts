@@ -367,20 +367,23 @@ function generateGroupRoute(
     if (runs && runs.length > 0) {
       const lines: string[] = [];
 
-      // Resolve all services
+      // Deduplicate: resolve each unique class only once
+      const seenClasses = new Map<string, string>(); // className → varName
       for (const run of runs) {
-        const varName =
-          run.className.charAt(0).toLowerCase() + run.className.slice(1);
-        lines.push(
-          `      const ${varName}: ${run.className} = container.resolve("${run.className}");`,
-        );
+        if (!seenClasses.has(run.className)) {
+          const varName =
+            run.className.charAt(0).toLowerCase() + run.className.slice(1);
+          seenClasses.set(run.className, varName);
+          lines.push(
+            `      const ${varName}: ${run.className} = container.resolve("${run.className}");`,
+          );
+        }
       }
 
       // Execute runs sequentially, last one returns
       for (let i = 0; i < runs.length - 1; i++) {
         const run = runs[i];
-        const varName =
-          run.className.charAt(0).toLowerCase() + run.className.slice(1);
+        const varName = seenClasses.get(run.className)!;
         if (hasBody) {
           lines.push(`      await ${varName}.${run.method}(body as any);`);
         } else {
@@ -389,8 +392,7 @@ function generateGroupRoute(
       }
 
       const last = runs[runs.length - 1];
-      const lastVar =
-        last.className.charAt(0).toLowerCase() + last.className.slice(1);
+      const lastVar = seenClasses.get(last.className)!;
       if (hasBody) {
         lines.push(`      return ${lastVar}.${last.method}(body as any);`);
       } else {
