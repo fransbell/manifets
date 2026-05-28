@@ -1,0 +1,18 @@
+{
+  "name": "manifets-cli",
+  "version": "1.0.0",
+  "bin": {
+    "manifets": "./src/index.ts"
+  },
+  "scripts": {
+    "generate": "bun run src/index.ts"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "bun-types": "latest",
+    "typescript": "^5.8.0"
+  }
+}

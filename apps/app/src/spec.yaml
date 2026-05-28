@@ -1,0 +1,84 @@
+api:
+  baseUrl: http://localhost:3000
+  routes:
+    # ── Common ──────────────────────────────────────────────────────────────
+    - path: /api/health
+      group: common
+      method: GET
+      response: { "status": "ok", "uptime": 123 }
+
+    - path: /api/version
+      group: common
+      method: GET
+      response: { "version": "1.0.0", "build": "abc123" }
+
+    # ── Auth ────────────────────────────────────────────────────────────────
+    - path: /api/auth/register
+      group: auth
+      method: POST
+      body: { "username": "john", "email": "john@example.com", "password": "secret" }
+      response: { "id": 1, "username": "john", "email": "john@example.com" }
+
+    - path: /api/auth/login
+      group: auth
+      method: POST
+      body: { "username": "example", "password": "123" }
+      response: { "token": "jwt-token-here", "expiresIn": 3600 }
+
+    - path: /api/auth/logout
+      group: auth
+      method: POST
+      response: { "message": "logged out" }
+
+    - path: /api/auth/refresh
+      group: auth
+      method: POST
+      body: { "refreshToken": "rt-abc123" }
+      response: { "token": "new-jwt", "refreshToken": "new-rt" }
+
+    # ── User ────────────────────────────────────────────────────────────────
+    - path: /api/user/profile
+      group: user
+      method: GET
+      response: { "id": 1, "username": "john", "email": "john@example.com", "bio": "hello world" }
+
+    - path: /api/user/profile
+      group: user
+      method: PUT
+      body: { "username": "john_updated", "email": "john2@example.com", "bio": "updated bio" }
+      response: { "id": 1, "username": "john_updated", "email": "john2@example.com", "bio": "updated bio" }
+
+    - path: /api/user/avatar
+      group: user
+      method: POST
+      body: { "url": "https://example.com/avatar.png" }
+      response: { "url": "https://example.com/avatar.png" }
+
+    - path: /api/user/account
+      group: user
+      method: DELETE
+      body: { "password": "secret" }
+      response: { "message": "account deleted" }
+
+    # ── Post ────────────────────────────────────────────────────────────────
+    - path: /api/posts
+      group: post
+      method: GET
+      response: [{ "id": 1, "title": "Hello", "content": "World", "authorId": 1 }]
+
+    - path: /api/posts
+      group: post
+      method: POST
+      body: { "title": "New Post", "content": "Some content", "tags": ["news", "tech"] }
+      response: { "id": 1, "title": "New Post", "content": "Some content", "authorId": 1 }
+
+    - path: /api/posts/detail
+      group: post
+      method: GET
+      response: { "id": 1, "title": "Hello", "content": "World", "authorId": 1, "views": 42 }
+
+    - path: /api/posts/detail
+      group: post
+      method: PUT
+      body: { "title": "Updated", "content": "Updated content" }
+      response: { "id": 1, "title": "Updated", "content": "Updated content", "authorId": 1 }

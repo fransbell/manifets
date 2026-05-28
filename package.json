@@ -1,0 +1,19 @@
+{
+  "name": "manifets",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "lint": "turbo lint",
+    "check-types": "turbo check-types"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.0",
+    "typescript": "^5.8.0"
+  },
+  "packageManager": "bun@1.2.13",
+  "dependencies": {
+    "elysia": "^1.4.28"
+  }
+}
