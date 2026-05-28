@@ -30,6 +30,8 @@ api:
       response: { "token": "jwt-token-here", "expiresIn": 3600 }
       runs:
         - name: service.AuthService.getToken
+          input: '{ username: .username, pass: .password }'
+          output: '{ token: .token, expires: .expiresIn }'
 
     - path: /api/auth/logout
       group: auth

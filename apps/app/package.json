@@ -3,13 +3,14 @@
   "version": "1.0.50",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "bun run --watch src/index.ts",
+    "dev": "bun run --watch generated/index.ts",
     "generate": "bun run ../../packages/manifets-cli/src/index.ts src/spec.yaml -o ./src/generated -i ./src/implems"
   },
   "dependencies": {
     "awilix": "^13.0.3",
     "elysia": "latest",
-    "js-yaml": "^4.1.1"
+    "js-yaml": "^4.1.1",
+    "node-jq": "^6.3.1"
   },
   "devDependencies": {
     "bun-types": "latest"

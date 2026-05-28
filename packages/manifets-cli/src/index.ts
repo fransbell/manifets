@@ -14,6 +14,8 @@ import yaml from "js-yaml";
 
 interface RunSpec {
   name: string; // e.g. "service.AuthService.getToken"
+  input?: string; // jq query to transform body BEFORE calling the method
+  output?: string; // jq query to transform result AFTER calling the method
 }
 
 interface RouteSpec {
@@ -37,6 +39,8 @@ interface ResolvedRun {
   namespace: string; // "service"
   className: string; // "AuthService"
   method: string; // "getToken"
+  input?: string; // jq query — transform body before calling
+  output?: string; // jq query — transform result after calling
 }
 
 /** What exists on disk inside implems/ */
@@ -155,15 +159,16 @@ function validateRuns(
   allRuns: Map<string, ResolvedRun[]>;
   usedClasses: Map<string, Set<string>>;
   fileMap: Map<string, string>; // "namespace:ClassName" → fileName
+  hasJq: boolean; // true if any run uses input/output jq
 } {
   const warnings: string[] = [];
   const allRuns = new Map<string, ResolvedRun[]>();
   const usedClasses = new Map<string, Set<string>>();
-  const fileMap = new Map<string, string>(); // "service:AuthService" → "auth.service"
+  const fileMap = new Map<string, string>();
+  let hasJq = false;
 
   const namespaces = scanImplemsDir(implemsDir);
 
-  // Build fileMap from scan results
   for (const [ns, services] of namespaces) {
     for (const svc of services) {
       fileMap.set(`${ns}:${svc.className}`, svc.fileName);
@@ -177,8 +182,23 @@ function validateRuns(
     const routeKey = `${route.method.toUpperCase()} ${route.path}`;
 
     for (const run of route.runs) {
-      const parsed = parseRunName(run.name);
+      const parts = run.name.split(".");
+      if (parts.length < 3) {
+        warnings.push(
+          `⚠️  ${routeKey}: invalid run name "${run.name}". Expected format: "namespace.Class.method"`,
+        );
+        continue;
+      }
+      const parsed: ResolvedRun = {
+        namespace: parts[0],
+        className: parts[1],
+        method: parts[2],
+        input: run.input,
+        output: run.output,
+      };
       resolved.push(parsed);
+
+      if (run.input || run.output) hasJq = true;
 
       if (!usedClasses.has(parsed.namespace)) {
         usedClasses.set(parsed.namespace, new Set());
@@ -211,7 +231,7 @@ function validateRuns(
     allRuns.set(routeKey, resolved);
   }
 
-  return { warnings, allRuns, usedClasses, fileMap };
+  return { warnings, allRuns, usedClasses, fileMap, hasJq };
 }
 
 // ── JS value → Elysia `t.*` schema string ────────────────────────────────────
@@ -286,6 +306,7 @@ function generateGroupRoute(
   fileMap: Map<string, string>,
   outDir: string,
   implemsDir: string,
+  hasJq: boolean,
 ): string {
   const hasGroupPrefix = routes.every(
     (r) => getGroupPrefixAndSuffix(group, r.path) !== null,
@@ -338,6 +359,10 @@ function generateGroupRoute(
           .join("\n") + "\n"
       : "";
 
+  const jqImport = hasJq
+    ? `import { jqRun } from "../jq";\n`
+    : "";
+
   const containerImport =
     serviceImports.size > 0
       ? `import { container } from "../container";\n`
@@ -367,8 +392,19 @@ function generateGroupRoute(
     if (runs && runs.length > 0) {
       const lines: string[] = [];
 
+      // Determine if this route uses body
+      // We track the current payload — starts as `body` (or undefined)
+      // and gets reassigned by input transforms
+      const usesPayload = hasBody || runs.some((r) => r.input);
+      const payloadVar = usesPayload ? "payload" : "";
+
+      // Initialize payload from body
+      if (usesPayload) {
+        lines.push("      let payload = body;");
+      }
+
       // Deduplicate: resolve each unique class only once
-      const seenClasses = new Map<string, string>(); // className → varName
+      const seenClasses = new Map<string, string>();
       for (const run of runs) {
         if (!seenClasses.has(run.className)) {
           const varName =
@@ -380,29 +416,55 @@ function generateGroupRoute(
         }
       }
 
-      // Execute runs sequentially, last one returns
-      for (let i = 0; i < runs.length - 1; i++) {
+      // Execute runs sequentially
+      for (let i = 0; i < runs.length; i++) {
         const run = runs[i];
         const varName = seenClasses.get(run.className)!;
-        if (hasBody) {
-          lines.push(`      await ${varName}.${run.method}(body as any);`);
-        } else {
-          lines.push(`      await ${varName}.${run.method}();`);
-        }
-      }
+        const isLast = i === runs.length - 1;
 
-      const last = runs[runs.length - 1];
-      const lastVar = seenClasses.get(last.className)!;
-      if (hasBody) {
-        lines.push(`      return ${lastVar}.${last.method}(body as any);`);
-      } else {
-        lines.push(`      return ${lastVar}.${last.method}();`);
+        // input transform: modify payload before calling
+        if (run.input) {
+          lines.push(
+            `      payload = await jqRun(${JSON.stringify(run.input)}, payload);`,
+          );
+        }
+
+        // call service method
+        const call = usesPayload
+          ? `${varName}.${run.method}(payload as any)`
+          : `${varName}.${run.method}()`;
+
+        if (isLast) {
+          // Last run — return (possibly with output transform)
+          if (run.output) {
+            lines.push(`      let result = await ${call};`);
+            lines.push(
+              `      result = await jqRun(${JSON.stringify(run.output)}, result);`,
+            );
+            lines.push("      return result;");
+          } else {
+            lines.push(`      return ${call};`);
+          }
+        } else {
+          // Non-last run — await, optionally capture for chaining
+          if (run.output) {
+            lines.push(
+              `      payload = await jqRun(${JSON.stringify(run.output)}, await ${call});`,
+            );
+          } else if (usesPayload) {
+            lines.push(`      await ${call};`);
+          } else {
+            lines.push(`      await ${call};`);
+          }
+        }
       }
 
       const inner = lines.join("\n");
       handlerBody = hasBody
         ? `({ body }) => {\n${inner}\n    }`
-        : `() => {\n${inner}\n    }`;
+        : usesPayload
+          ? `({ body }) => {\n${inner}\n    }`
+          : `() => {\n${inner}\n    }`;
     } else {
       const todoReturn = `return ${JSON.stringify(r.response)};`;
       handlerBody = hasBody
@@ -430,7 +492,7 @@ function generateGroupRoute(
   if (prefixInfo) {
     const body = routeDefs.join("\n\n");
     return `import Elysia from "elysia";
-${containerImport}${serviceImportStr}${reqImportStr}${resImportStr}
+${jqImport}${containerImport}${serviceImportStr}${reqImportStr}${resImportStr}
 const ${group} = new Elysia().group("${prefixInfo.prefix}", (app) => {
 ${body}\n\n  return app;
 });
@@ -441,7 +503,7 @@ export { ${group} };
 
   const chainBody = routeDefs.join("\n");
   return `import Elysia from "elysia";
-${containerImport}${serviceImportStr}${reqImportStr}${resImportStr}
+${jqImport}${containerImport}${serviceImportStr}${reqImportStr}${resImportStr}
 const ${group} = new Elysia()${chainBody};
 
 export { ${group} };
@@ -482,6 +544,24 @@ function generateResponseTypes(
   return `import { t } from "elysia";
 
 ${exports.join("\n\n")}
+`;
+}
+
+// ── jq helper generator ─────────────────────────────────────────────────────
+
+function generateJqHelper(): string {
+  return `import { run } from "node-jq";
+
+/**
+ * Run a jq filter against a JSON value.
+ * Returns the transformed result as a parsed JS object.
+ */
+export async function jqRun(filter: string, input: unknown): Promise<any> {
+  return run(filter, input as Record<string, unknown>, {
+    input: "json",
+    output: "json",
+  });
+}
 `;
 }
 
@@ -592,7 +672,7 @@ function main() {
 
   // ── Validate runs against implems ──
   console.log(`🔍 Scanning implems: ${impDir}`);
-  const { warnings, allRuns, usedClasses, fileMap } = validateRuns(routes, impDir);
+  const { warnings, allRuns, usedClasses, fileMap, hasJq } = validateRuns(routes, impDir);
 
   if (warnings.length > 0) {
     console.error("\n⚠️  Implementation warnings:\n");
@@ -633,7 +713,7 @@ function main() {
   for (const [group, groupRoutes_] of grouped) {
     files.push([
       join(outDir, "routes", `${group}.route.ts`),
-      generateGroupRoute(group, groupRoutes_, allRuns, fileMap, outDir, impDir),
+      generateGroupRoute(group, groupRoutes_, allRuns, fileMap, outDir, impDir, hasJq),
     ]);
   }
 
@@ -662,6 +742,11 @@ function main() {
       join(outDir, "container.ts"),
       generateContainer(usedClasses, fileMap, outDir, impDir),
     ]);
+  }
+
+  // jq.ts (only if any run uses input/output jq queries)
+  if (hasJq) {
+    files.push([join(outDir, "jq.ts"), generateJqHelper()]);
   }
 
   // ── Write ──
