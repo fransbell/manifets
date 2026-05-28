@@ -4,6 +4,5 @@ dist
 .next
 .env
 .env.local
-generated/
-src/generated/
+generated
 bun.lock
