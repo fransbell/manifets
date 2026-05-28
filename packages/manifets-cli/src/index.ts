@@ -392,15 +392,18 @@ function generateGroupRoute(
     if (runs && runs.length > 0) {
       const lines: string[] = [];
 
-      // Determine if this route uses body
-      // We track the current payload — starts as `body` (or undefined)
-      // and gets reassigned by input transforms
-      const usesPayload = hasBody || runs.some((r) => r.input);
-      const payloadVar = usesPayload ? "payload" : "";
+      // Determine if runs need a payload variable.
+      // payload is initialized from `body` when the route has a body,
+      // or from `{}` when there's no body but runs use jq input transforms.
+      const needsJqInput = runs.some((r) => r.input);
+      const usesPayload = hasBody || needsJqInput;
 
-      // Initialize payload from body
+      // Initialize payload
       if (usesPayload) {
-        lines.push("      let payload = body;");
+        lines.push(hasBody
+          ? "      let payload = body;"
+          : "      let payload = {} as any;",
+        );
       }
 
       // Deduplicate: resolve each unique class only once
@@ -462,9 +465,7 @@ function generateGroupRoute(
       const inner = lines.join("\n");
       handlerBody = hasBody
         ? `({ body }) => {\n${inner}\n    }`
-        : usesPayload
-          ? `({ body }) => {\n${inner}\n    }`
-          : `() => {\n${inner}\n    }`;
+        : `() => {\n${inner}\n    }`;
     } else {
       const todoReturn = `return ${JSON.stringify(r.response)};`;
       handlerBody = hasBody
