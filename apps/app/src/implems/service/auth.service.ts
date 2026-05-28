@@ -4,16 +4,12 @@ export class AuthService {
     return { token: "jwt-token-here", expiresIn: 3600 };
   }
 
-  async register(body: {
-    username: string;
-    email: string;
-    password: string;
-  }) {
+  async register(body: { username: string; email: string; password: string }) {
     // TODO: create user in DB and return profile
     return { id: 1, username: body.username, email: body.email };
   }
 
-  async logout() {
+  async logout(payload: any) {
     // TODO: invalidate session / token
     return { message: "logged out" };
   }

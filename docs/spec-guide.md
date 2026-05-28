@@ -19,6 +19,8 @@ api:
       response: { ... }
       runs:                  # optional
         - name: <namespace>.<Class>.<method>
+          input: '{ jq query }'   # optional — transform body before call
+          output: '{ jq query }'  # optional — transform result after call
 ```
 
 ---
@@ -186,7 +188,7 @@ return authService.getToken(body as any);
 ```
 
 **Requirements:**
-- The service file must exist in your implems folder: `implems/<namespace>/<class-name>.ts`
+- The service file must exist in your implems folder: `implems/<namespace>/<name>.service.ts`
   - e.g. `implems/service/auth.service.ts` exporting `class AuthService`
 - The method must exist on that class as `async`
 - If anything is missing, the CLI will warn you at generate time
@@ -198,22 +200,136 @@ return authService.getToken(body as any);
 List multiple runs — they execute sequentially, the last one's result is returned:
 
 ```yaml
-- path: /api/admin/purge
-  group: admin
+- path: /api/auth/logout
+  group: auth
   method: POST
-  body: { "confirm": true }
-  response: { "purged": true }
+  response: { "message": "logged out" }
   runs:
-    - name: service.CacheService.flush
-    - name: service.AdminService.purgeAll
+    - name: service.AuthService.logout
+    - name: service.LoggerService.logAction
+      input: '{ action: "logout" }'
 ```
 
 **Generated:**
 ```ts
-const cacheService: CacheService = container.resolve("CacheService");
-const adminService: AdminService = container.resolve("AdminService");
-await cacheService.flush(body as any);
-return adminService.purgeAll(body as any);
+const authService: AuthService = container.resolve("AuthService");
+const loggerService: LoggerService = container.resolve("LoggerService");
+await authService.logout();
+payload = await jqRun("{ action: \"logout\" }", payload);
+return loggerService.logAction(payload as any);
+```
+
+Each unique class is resolved only once — even if multiple runs reference the same service.
+
+---
+
+### How to transform body or result with jq? (`input` / `output`)
+
+Each run supports optional `input` and `output` fields with **jq query syntax** powered by [node-jq](https://github.com/sanack/node-jq):
+
+- **`input`** — transforms the payload **before** calling the service method
+- **`output`** — transforms the result **after** calling the service method
+
+#### Input transform (reshape body before calling service)
+
+```yaml
+- path: /api/auth/login
+  group: auth
+  method: POST
+  body: { "username": "example", "password": "123" }
+  response: { "token": "jwt-token-here", "expiresIn": 3600 }
+  runs:
+    - name: service.AuthService.getToken
+      input: '{ username: .username, pass: .password }'
+```
+
+**Generated:**
+```ts
+let payload = body;
+const authService: AuthService = container.resolve("AuthService");
+payload = await jqRun("{ username: .username, pass: .password }", payload);
+return authService.getToken(payload as any);
+```
+
+#### Output transform (reshape result after calling service)
+
+```yaml
+- path: /api/auth/login
+  group: auth
+  method: POST
+  body: { "username": "example", "password": "123" }
+  response: { "token": "jwt-token-here", "expiresIn": 3600 }
+  runs:
+    - name: service.AuthService.getToken
+      output: '{ token: .token, expires: .expiresIn }'
+```
+
+**Generated:**
+```ts
+let result = await authService.getToken(payload as any);
+result = await jqRun("{ token: .token, expires: .expiresIn }", result);
+return result;
+```
+
+#### Both input and output
+
+```yaml
+runs:
+  - name: service.AuthService.getToken
+    input: '{ username: .username, pass: .password }'
+    output: '{ token: .token, expires: .expiresIn }'
+```
+
+**Generated:**
+```ts
+payload = await jqRun("{ username: .username, pass: .password }", payload);
+let result = await authService.getToken(payload as any);
+result = await jqRun("{ token: .token, expires: .expiresIn }", result);
+return result;
+```
+
+#### jq on a no-body route
+
+When a route has no `body` but a run uses `input`, the payload starts as `{}`:
+
+```yaml
+- path: /api/auth/logout
+  group: auth
+  method: POST
+  response: { "message": "logged out" }
+  runs:
+    - name: service.LoggerService.logAction
+      input: '{ action: "logout" }'
+```
+
+**Generated:**
+```ts
+async () => {
+  let payload = {} as any;
+  // ...
+  payload = await jqRun("{ action: \"logout\" }", payload);
+  return loggerService.logAction(payload as any);
+}
+```
+
+#### Chaining jq across multiple runs
+
+Each run can have its own `input`/`output`. They chain sequentially — an earlier run's `output` can feed into the next run's `input`:
+
+```yaml
+runs:
+  - name: service.LoggerService.logAction
+    input: '{ action: "create_post", meta: { title: .title } }'
+  - name: service.PostService.create
+    input: '{ title, content, tags }'
+```
+
+**Generated:**
+```ts
+payload = await jqRun("{ action: \"create_post\", meta: { title: .title } }", payload);
+await loggerService.logAction(payload as any);
+payload = await jqRun("{ title, content, tags }", payload);
+return postService.create(payload as any);
 ```
 
 ---
@@ -332,6 +448,7 @@ The code is still generated, but the handler will call a method that doesn't exi
 generated/
 ├── index.ts                          # Elysia app entry point
 ├── container.ts                      # Awilix DI (only if runs are used)
+├── jq.ts                             # jq helper (only if input/output used)
 ├── routes/
 │   ├── index.ts                      # Combines all group routes
 │   ├── common.route.ts
@@ -348,4 +465,83 @@ generated/
         ├── auth.response.ts
         ├── user.response.ts
         └── post.response.ts
+```
+
+---
+
+## Full example
+
+Here's a complete spec.yaml using all features — multiple services, multi-run chains, and jq transforms:
+
+```yaml
+api:
+  baseUrl: http://localhost:3000
+  routes:
+    # ── Auth ──────────────────────────────────────────────────────────────
+    - path: /api/auth/register
+      group: auth
+      method: POST
+      body: { "username": "john", "email": "john@example.com", "password": "secret" }
+      response: { "id": 1, "username": "john", "email": "john@example.com" }
+      runs:
+        - name: service.LoggerService.logAction
+          input: '{ action: "register", meta: { username: .username } }'
+        - name: service.AuthService.register
+
+    - path: /api/auth/login
+      group: auth
+      method: POST
+      body: { "username": "example", "password": "123" }
+      response: { "token": "jwt-token-here", "expiresIn": 3600 }
+      runs:
+        - name: service.AuthService.getToken
+          input: '{ username: .username, pass: .password }'
+          output: '{ token: .token, expires: .expiresIn }'
+
+    - path: /api/auth/logout
+      group: auth
+      method: POST
+      response: { "message": "logged out" }
+      runs:
+        - name: service.AuthService.logout
+        - name: service.LoggerService.logAction
+          input: '{ action: "logout" }'
+
+    # ── User ──────────────────────────────────────────────────────────────
+    - path: /api/user/profile
+      group: user
+      method: GET
+      response: { "id": 1, "username": "john", "email": "john@example.com", "bio": "hello world" }
+      runs:
+        - name: service.UserService.getProfile
+          output: '{ id, name: .username, email, bio }'
+
+    - path: /api/user/account
+      group: user
+      method: DELETE
+      body: { "password": "secret" }
+      response: { "message": "account deleted" }
+      runs:
+        - name: service.UserService.deleteAccount
+        - name: service.LoggerService.logAction
+          input: '{ action: "account_deleted" }'
+
+    # ── Post ──────────────────────────────────────────────────────────────
+    - path: /api/posts
+      group: post
+      method: GET
+      response: [{ "id": 1, "title": "Hello", "content": "World", "authorId": 1 }]
+      runs:
+        - name: service.PostService.list
+
+    - path: /api/posts
+      group: post
+      method: POST
+      body: { "title": "New Post", "content": "Some content", "tags": ["news", "tech"] }
+      response: { "id": 1, "title": "New Post", "content": "Some content", "authorId": 1 }
+      runs:
+        - name: service.LoggerService.logAction
+          input: '{ action: "create_post", meta: { title: .title } }'
+        - name: service.PostService.create
+          input: '{ title, content, tags }'
 ```

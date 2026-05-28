@@ -38,9 +38,10 @@ api:
       method: POST
       response: { "message": "logged out" }
       runs:
-        - name: service.AuthService.logout
         - name: service.LoggerService.logAction
           input: '{ action: "logout" }'
+        - name: service.AuthService.logout
+        
 
     - path: /api/auth/refresh
       group: auth
