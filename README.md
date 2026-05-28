@@ -2,7 +2,9 @@
 
 > Manifest-driven code generation for [Elysia](https://elysiajs.com/) APIs
 
-`manifets` reads a YAML manifest describing your API routes and generates a fully-typed Elysia project — routes, request/response schemas, and entry point — in seconds.
+`manifets` reads a YAML manifest describing your API routes and generates a fully-typed Elysia project — routes, request/response schemas, DI container, and entry point — in seconds.
+
+📖 **[Spec Manifest Guide →](docs/spec-guide.md)** — Q&A walkthrough for writing `spec.yaml`
 
 ---
 
@@ -50,6 +52,8 @@ api:
       method: POST
       body: { "username": "example", "password": "123" }
       response: { "token": "jwt-token-here", "expiresIn": 3600 }
+      runs:
+        - name: service.AuthService.getToken
 
     - path: /api/user/profile
       group: user
@@ -65,8 +69,11 @@ api:
 | `method`   | HTTP method (`GET`, `POST`, `PUT`, `DELETE`, etc.)                |
 | `body`     | Example request body — used to derive the Elysia `t.*` schema     |
 | `response` | Example response body — used to derive the Elysia `t.*` schema    |
+| `runs`     | Service method bindings — `namespace.Class.method` (see [guide](docs/spec-guide.md)) |
 
 Routes within the same `group` that share a common path prefix are automatically collapsed into an Elysia `.group()`.
+
+→ **Full Q&A guide:** [docs/spec-guide.md](docs/spec-guide.md)
 
 ---
 
@@ -79,15 +86,16 @@ Routes within the same `group` that share a common path prefix are automatically
 bun run --filter manifets-cli generate
 
 # Or directly
-bun packages/manifets-cli/src/index.ts <spec.yaml> [output-dir]
+bun packages/manifets-cli/src/index.ts <spec.yaml> -o <output-dir> -i <implems-dir>
 ```
 
 **Arguments:**
 
-| Argument      | Default        | Description                       |
-|---------------|----------------|-----------------------------------|
-| `spec.yaml`   | *(required)*   | Path to your manifest file        |
-| `output-dir`  | `./generated`  | Directory to write generated code |
+| Argument             | Default        | Description                                |
+|----------------------|----------------|--------------------------------------------|
+| `spec.yaml`          | *(required)*   | Path to your manifest file                 |
+| `-o, --output`       | `./generated`  | Directory to write generated code          |
+| `-i, --implems`      | `./implems`    | Implementation folder to validate `runs` against |
 
 ### In an app workspace
 
@@ -110,11 +118,16 @@ manifets/
 │   └── app/                  # Example Elysia app consuming the CLI
 │       └── src/
 │           ├── spec.yaml     # API manifest
+│           ├── implems/      # Hand-written services (DI)
+│           │   └── service/
+│           │       └── auth.service.ts
 │           └── generated/    # ← auto-generated output
 ├── packages/
 │   └── manifets-cli/         # The code generator
 │       └── src/
 │           └── index.ts
+├── docs/
+│   └── spec-guide.md         # How to write spec.yaml
 ├── turbo.json
 ├── package.json
 └── README.md
@@ -146,20 +159,32 @@ bun run dev
 
 Running the CLI against the example `spec.yaml` produces:
 
-**`routes/auth.route.ts`** — grouped routes with typed schemas:
+**`routes/auth.route.ts`** — grouped routes with DI-wired handlers:
 ```ts
 import Elysia from "elysia";
-import { POSTAuthRegisterRequest, POSTAuthLoginRequest, POSTAuthRefreshRequest } from "../types/request/auth.request";
-import { POSTAuthRegisterResponse, POSTAuthLoginResponse, POSTAuthLogoutResponse, POSTAuthRefreshResponse } from "../types/response/auth.response";
+import { container } from "../container";
+import { AuthService } from "../../implems/service/auth.service";
+import { POSTAuthLoginResponse } from "../types/response/auth.response";
 
 const auth = new Elysia().group("/api/auth", (app) => {
-  app.post("/register", async ({ body }) => { /* TODO */ }, { body: POSTAuthRegisterRequest, response: { 200: POSTAuthRegisterResponse } });
-  app.post("/login",    async ({ body }) => { /* TODO */ }, { body: POSTAuthLoginRequest,    response: { 200: POSTAuthLoginResponse } });
+  app.post("/login", async ({ body }) => {
+    const authService: AuthService = container.resolve("AuthService");
+    return authService.getToken(body as any);
+  }, { response: { 200: POSTAuthLoginResponse } });
   // ...
   return app;
 });
 
 export { auth };
+```
+
+**`container.ts`** — Awilix DI wiring:
+```ts
+import { createContainer, asClass, InjectionMode } from "awilix";
+import { AuthService } from "../implems/service/auth.service";
+
+export const container = createContainer({ injectionMode: InjectionMode.CLASSIC });
+container.register({ AuthService: asClass(AuthService).singleton() });
 ```
 
 **`types/response/auth.response.ts`** — Elysia type schemas:
@@ -171,6 +196,8 @@ export const POSTAuthLoginResponse = t.Object({
   expiresIn: t.Number()
 });
 ```
+
+→ **Learn more in the [Spec Manifest Guide](docs/spec-guide.md)**
 
 ---
 

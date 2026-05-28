@@ -45,6 +45,7 @@ api:
       response: { "token": "new-jwt", "refreshToken": "new-rt" }
       runs:
         - name: service.AuthService.refresh
+        - name: service.AuthService.refresh
 
     # ── User ────────────────────────────────────────────────────────────────
     - path: /api/user/profile
